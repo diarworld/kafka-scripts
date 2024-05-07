@@ -1,0 +1,43 @@
+---
+- name: Create user for Kafka Cluster
+  hosts: localhost
+  vars:
+    zookeeper_path:  <!host:port!>
+    user_password: "{{ lookup('password', '/dev/null length=15') }}"
+    user_name: test4
+    vault_url: https://<!vault url!>/
+    vault_token: <!your token!>
+    namespace: <!namespace!>
+    mount_point: test
+    secret: principals
+  tasks:
+  - name: Check if user exists
+    shell:
+      cmd: kafka-configs --zookeeper "{{ zookeeper_path }}" --describe --entity-name "{{ user_name }}" --entity-type users
+    args:
+      executable: /bin/bash
+    register: user_exists
+
+  - block:
+
+    - name: Create user if not exists
+      shell:
+        cmd: kafka-configs --zookeeper "{{ zookeeper_path }}" --alter --add-config 'SCRAM-SHA-256=[iterations=8192,password="{{user_password}}"],SCRAM-SHA-512=[password="{{user_password}}"]' --entity-type users --entity-name "{{ user_name }}"
+      args:
+        executable: /bin/bash
+
+    - name: Save password to Vault
+      hashivault_write:
+        authtype: token
+        token: "{{ vault_token }}"
+        url: "{{ vault_url }}"
+        namespace: "{{ namespace }}"
+        version: 2
+        mount_point: "{{ mount_point }}"
+        secret: "{{ secret }}"
+        data:
+          "{ '{{ user_name }}': '{{ user_password }}' }"
+        update: yes
+        verify: 0
+
+    when: user_exists['stdout'] | regex_search('Configs for user-principal .* are SCRAM.*') | trim == "None"
